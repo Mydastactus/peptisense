@@ -126,29 +126,27 @@ function ProtocolCard({ p, onLog, onEdit }) {
   const total = p.total || 0;
   const pct = total ? Math.round((p.done/total)*100) : 0;
   const complete = total>0 && p.done>=total;
-  return <Panel accent={p.accent} className="p-4 transition-transform duration-150 active:scale-[0.99]">
+  return <Panel accent={p.accent} glow className="p-6">
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-3 min-w-0">
-        <div className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${a.soft} ${a.text} ring-1 ${a.ring}`}><Icon name="syringe" size={20} /></div>
-        <div className="min-w-0"><h3 className="font-bold leading-tight text-white truncate">{p.name}</h3><p className="text-xs text-slate-400 truncate">{p.route}</p></div>
+        <div className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl ${a.soft} ${a.text} ring-1 ${a.ring}`}><Icon name="syringe" size={26} /></div>
+        <div className="min-w-0"><h3 className="text-lg font-bold leading-tight text-white truncate">{p.name}</h3><p className="text-sm text-slate-400 truncate">{p.route}</p></div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <span className={`rounded-lg ${a.soft} px-2.5 py-1 text-sm font-bold ${a.text}`}>{p.dose}</span>
-        <button onClick={()=>onEdit(p)} aria-label="Edit protocol" className="grid h-7 w-7 place-items-center rounded-lg border border-[#30363D] text-slate-400 transition hover:text-white"><Icon name="pencil" size={13} /></button>
-      </div>
+      <button onClick={()=>onEdit(p)} aria-label="Edit protocol" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-[#30363D] text-slate-400 transition hover:text-white"><Icon name="pencil" size={15} /></button>
     </div>
-    <div className="mt-4">
-      <div className="mb-1.5 flex items-center justify-between text-xs"><span className="text-slate-400">This week</span><span className="font-semibold text-slate-200">{p.done}/{total} doses</span></div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-[#0F172A]"><div className={`h-full rounded-full bg-gradient-to-r ${a.from} ${a.to} transition-all duration-500`} style={{width:`${pct}%`}} /></div>
+    <div className={`mt-5 text-3xl font-extrabold ${a.text}`}>{p.dose}</div>
+    <div className="mt-5">
+      <div className="mb-2 flex items-center justify-between text-sm"><span className="text-slate-400">This week</span><span className="font-semibold text-slate-200">{p.done}/{total} doses</span></div>
+      <div className="h-3 w-full overflow-hidden rounded-full bg-[#0F172A]"><div className={`h-full rounded-full bg-gradient-to-r ${a.from} ${a.to} transition-all duration-500`} style={{width:`${pct}%`}} /></div>
     </div>
-    <div className="mt-4 flex items-center justify-between gap-2">
+    <div className="mt-6 flex items-center justify-between gap-2">
       <div className="flex items-center gap-1.5 text-sm min-w-0">
-        <Icon name="clock" size={15} className={p.next?a.text:"text-slate-500"} />
+        <Icon name="clock" size={16} className={p.next?a.text:"text-slate-500"} />
         <span className="text-slate-400">Next</span>
         <span className={`font-semibold truncate ${p.next?a.text:"text-slate-500"}`}>{p.next||"—"}</span>
       </div>
       <button onClick={()=>onLog(p.id)} disabled={complete}
-        className={["inline-flex shrink-0 items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-bold transition", complete?"cursor-default bg-[#14B8A6]/15 text-[#14B8A6]":`bg-gradient-to-r ${a.from} ${a.to} text-[#04121a] hover:brightness-110 active:scale-95 ${a.glow}`].join(" ")}>
+        className={["inline-flex shrink-0 items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-bold transition", complete?"cursor-default bg-[#14B8A6]/15 text-[#14B8A6]":`bg-gradient-to-r ${a.from} ${a.to} text-[#04121a] active:scale-95 ${a.glow}`].join(" ")}>
         {complete ? <><Icon name="check" size={16} stroke={3} /> Done</> : <><Icon name="plus" size={16} stroke={3} /> Log Dose</>}
       </button>
     </div>
@@ -157,18 +155,58 @@ function ProtocolCard({ p, onLog, onEdit }) {
 
 function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
   const scroller = useRef(null);
+  const raf = useRef(0);
+  const idxRef = useRef(0);
   const [idx, setIdx] = useState(0);
-  const cardStep = () => {
-    const el = scroller.current; if (!el) return 1;
-    const c = el.querySelector("[data-card]");
-    return c ? c.offsetWidth + 12 : el.clientWidth;
+  const [cardW, setCardW] = useState(300);
+
+  // coverflow: rotate/scale each card by its distance from the viewport center
+  const update = () => {
+    const el = scroller.current; if (!el) return;
+    const mid = el.getBoundingClientRect().left + el.clientWidth / 2;
+    const cards = el.querySelectorAll("[data-card]");
+    let best = 0, bestDist = Infinity;
+    cards.forEach((c, i) => {
+      const r = c.getBoundingClientRect();
+      const cc = r.left + r.width / 2;
+      const delta = r.width ? (cc - mid) / r.width : 0;
+      const cl = Math.max(-1.6, Math.min(1.6, delta));
+      const abs = Math.min(Math.abs(cl), 1);
+      const inner = c.children[0];
+      if (inner) {
+        inner.style.transform = `rotateY(${-cl * 46}deg) scale(${1 - abs * 0.16})`;
+        inner.style.opacity = String(1 - abs * 0.45);
+      }
+      c.style.zIndex = String(100 - Math.round(abs * 100));
+      const d = Math.abs(cc - mid);
+      if (d < bestDist) { bestDist = d; best = i; }
+    });
+    if (best !== idxRef.current) { idxRef.current = best; setIdx(best); }
   };
-  const onScroll = () => { const el = scroller.current; if (el) setIdx(Math.round(el.scrollLeft / cardStep())); };
+
+  const layout = () => {
+    const el = scroller.current; if (!el) return;
+    const w = el.clientWidth;
+    const cw = Math.max(240, Math.min(Math.round(w * 0.76), 440));
+    const pad = Math.max(Math.round((w - cw) / 2), 12);
+    el.style.paddingLeft = pad + "px";
+    el.style.paddingRight = pad + "px";
+    setCardW(cw);
+  };
+
+  useEffect(() => { layout(); const onR = () => { layout(); requestAnimationFrame(update); }; window.addEventListener("resize", onR); return () => window.removeEventListener("resize", onR); }, []);
+  useEffect(() => { const t = requestAnimationFrame(update); return () => cancelAnimationFrame(t); }, [cardW, protocols.length]);
+
+  const onScroll = () => { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(update); };
+
   const goTo = (i) => {
     const el = scroller.current; if (!el) return;
-    const clamped = Math.min(Math.max(i, 0), protocols.length - 1);
-    el.scrollTo({ left: clamped * cardStep(), behavior: "smooth" });
+    const cards = el.querySelectorAll("[data-card]");
+    const c = cards[Math.max(0, Math.min(i, cards.length - 1))]; if (!c) return;
+    const r = c.getBoundingClientRect(); const er = el.getBoundingClientRect();
+    el.scrollTo({ left: el.scrollLeft + (r.left + r.width / 2) - (er.left + el.clientWidth / 2), behavior: "smooth" });
   };
+
   return (
     <section id="protocols" className="pt-6">
       <div className="flex items-center justify-between px-5">
@@ -190,11 +228,13 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
         </div>
       ) : (
         <>
-          <div className="relative mt-3">
-            <div ref={scroller} onScroll={onScroll} className="no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-1">
+          <div className="relative mt-2">
+            <div ref={scroller} onScroll={onScroll} className="no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto py-8">
               {protocols.map((p) => (
-                <div key={p.id} data-card className="w-[86%] shrink-0 snap-start sm:w-[336px]">
-                  <ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />
+                <div key={p.id} data-card className="shrink-0 snap-center" style={{ width: cardW, perspective: "1000px" }}>
+                  <div style={{ transformOrigin: "center center", transition: "transform .1s ease-out, opacity .1s ease-out", willChange: "transform" }}>
+                    <ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />
+                  </div>
                 </div>
               ))}
             </div>
@@ -206,7 +246,7 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
             )}
           </div>
           {protocols.length > 1 && (
-            <div className="mt-3 flex justify-center gap-1.5">
+            <div className="mt-1 flex justify-center gap-1.5">
               {protocols.map((_, i) => (
                 <button key={i} onClick={() => goTo(i)} aria-label={`Protocol ${i + 1}`} className={`h-1.5 rounded-full transition-all ${i === idx ? "w-5 bg-[#00F2FE] shadow-[0_0_8px_#00F2FE]" : "w-1.5 bg-slate-600 hover:bg-slate-500"}`} />
               ))}
@@ -636,11 +676,14 @@ function HomeTab({ protocols, insights, onNav }) {
   const comp = insights.find(i=>i.id==="compliance") || {};
   const sleep = insights.find(i=>i.id==="sleep") || {};
   const nextP = protocols.find(p=>p.next && String(p.next).trim());
+  const sleepSeries = sleep.series && sleep.series.length > 1 ? sleep.series : null;
+  const sleepAvg = sleepSeries ? Math.round((sleepSeries.reduce((a,b)=>a+b,0)/sleepSeries.length)*10)/10 : null;
+  const compPct = comp.value === "—" ? null : (parseInt(comp.value) || 0);
   const tiles = [
-    { label:"Protocols", sub: protocols.length?"active":"none yet", value:String(protocols.length), icon:"clipboard-list", tab:"protocols", accent:"cyan", big:true },
-    { label:"Compliance", sub:"this week", value: comp.value==="—"?"—":`${comp.value}%`, icon:"target", tab:"insights", accent:"blue", big:true },
-    { label:"Last sleep", sub: sleep.value==="—"?"no data":"latest night", value: sleep.value==="—"?"—":`${sleep.value}h`, icon:"moon", tab:"insights", accent:"teal", big:true },
-    { label:"Next dose", sub: nextP?nextP.name:"not set", value: nextP?nextP.next:"—", icon:"clock", tab:"protocols", accent:"cyan", big:false },
+    { key:"protocols", label:"Protocols", sub: protocols.length?"active":"none yet", value:String(protocols.length), icon:"clipboard-list", tab:"protocols", accent:"cyan", big:true },
+    { key:"compliance", label:"Compliance", sub:"this week", value: compPct==null?"—":`${compPct}%`, icon:"target", tab:"insights", accent:"blue", big:true, bar:compPct },
+    { key:"sleep", label:"Sleep", sub: sleepAvg!=null?`avg ${sleepAvg}h`:"no data yet", value: sleep.value==="—"?"—":`${sleep.value}h`, icon:"moon", tab:"insights", accent:"teal", big:true, spark:sleepSeries },
+    { key:"next", label:"Next dose", sub: nextP?nextP.name:"not set", value: nextP?nextP.next:"—", icon:"clock", tab:"protocols", accent:"cyan", big:false },
   ];
   return (
     <div>
@@ -649,10 +692,12 @@ function HomeTab({ protocols, insights, onNav }) {
         <SectionHeading title="Today at a glance" />
         <div className="mt-3 grid grid-cols-2 gap-3">
           {tiles.map((t)=>{ const a=ACCENTS[t.accent]; return (
-            <button key={t.label} onClick={()=>onNav(t.tab)} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-4 text-left transition active:scale-[0.98]">
+            <button key={t.key} onClick={()=>onNav(t.tab)} className="flex min-h-[132px] flex-col rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-4 text-left transition active:scale-[0.98]">
               <span className={`inline-grid h-8 w-8 place-items-center rounded-lg ${a.soft} ${a.text}`}><Icon name={t.icon} size={16} /></span>
               <div className={`mt-3 truncate font-extrabold text-white ${t.big?"text-2xl":"text-base"}`}>{t.value}</div>
               <div className="mt-0.5 truncate text-[11px] text-slate-500">{t.label} · {t.sub}</div>
+              {t.spark && <div className="mt-auto pt-2"><Sparkline data={t.spark} color={a.hex} height={26} /></div>}
+              {t.bar!=null && <div className="mt-auto pt-3"><div className="h-1.5 w-full overflow-hidden rounded-full bg-[#0F172A]"><div className="h-full rounded-full bg-gradient-to-r from-[#3B82F6] to-[#00F2FE]" style={{width:`${Math.max(t.bar,2)}%`}} /></div></div>}
             </button>
           );})}
         </div>
