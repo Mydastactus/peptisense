@@ -182,7 +182,7 @@ function Coverflow({ items, renderCard, keyOf }) {
         inner.style.opacity = String(op);
         inner.style.pointerEvents = abs < 0.5 ? "auto" : "none"; // only the focused card is tappable
       }
-      c.style.zIndex = String(1000 - Math.round(abs * 100));
+      c.style.zIndex = String(Math.max(1, 20 - Math.round(abs * 10))); // stack among cards, stay below nav/overlays
       const d = Math.abs(cc - mid);
       if (d < bestDist) { bestDist = d; best = i; }
     });
@@ -223,8 +223,8 @@ function Coverflow({ items, renderCard, keyOf }) {
             </div>
           ))}
         </div>
-        {idx > 0 && <button onClick={() => goTo(idx - 1)} aria-label="Previous" className="absolute left-2 top-1/2 z-[1100] hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-left" size={18} /></button>}
-        {idx < items.length - 1 && <button onClick={() => goTo(idx + 1)} aria-label="Next" className="absolute right-2 top-1/2 z-[1100] hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-right" size={18} /></button>}
+        {idx > 0 && <button onClick={() => goTo(idx - 1)} aria-label="Previous" className="absolute left-2 top-1/2 z-30 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-left" size={18} /></button>}
+        {idx < items.length - 1 && <button onClick={() => goTo(idx + 1)} aria-label="Next" className="absolute right-2 top-1/2 z-30 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-right" size={18} /></button>}
       </div>
       {items.length > 1 && (
         <div className="mt-1 flex justify-center gap-1.5">
@@ -671,7 +671,7 @@ function Splash({ onDone }) {
   const finish = () => { if (done.current) return; done.current = true; setHiding(true); setTimeout(onDone, 450); };
   useEffect(() => { const t = setTimeout(finish, 12000); return () => clearTimeout(t); }, []);
   return (
-    <div onClick={finish} className={`fixed inset-0 z-[100] flex items-center justify-center bg-[#0F172A] transition-opacity duration-500 ${hiding ? "opacity-0" : "opacity-100"}`}>
+    <div onClick={finish} className={`fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A] transition-opacity duration-500 ${hiding ? "opacity-0" : "opacity-100"}`}>
       <video autoPlay muted playsInline preload="auto" onEnded={finish} onError={finish} className="h-full w-full object-cover" src={SPLASH_SRC} />
       <button onClick={(e)=>{ e.stopPropagation(); finish(); }} className="absolute right-4 rounded-full bg-black/40 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur transition active:scale-95" style={{ top: "calc(env(safe-area-inset-top) + 16px)" }}>Skip ›</button>
     </div>
