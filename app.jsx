@@ -1,4 +1,4 @@
-const { useState, useMemo, useRef } = React;
+const { useState, useMemo, useRef, useEffect } = React;
 
 /* ---- lucide icon wrapper ---- */
 const toPascal = (s) => s.split("-").map(w => w[0].toUpperCase() + w.slice(1)).join("");
@@ -616,6 +616,21 @@ function BottomNav({ active, onNav }) {
   </nav>;
 }
 
+/* ---- video splash ---- */
+const SPLASH_SRC = (typeof window !== "undefined" && window.__SPLASH__) || "";
+function Splash({ onDone }) {
+  const [hiding, setHiding] = useState(false);
+  const done = useRef(false);
+  const finish = () => { if (done.current) return; done.current = true; setHiding(true); setTimeout(onDone, 450); };
+  useEffect(() => { const t = setTimeout(finish, 12000); return () => clearTimeout(t); }, []);
+  return (
+    <div onClick={finish} className={`fixed inset-0 z-[100] flex items-center justify-center bg-[#0F172A] transition-opacity duration-500 ${hiding ? "opacity-0" : "opacity-100"}`}>
+      <video autoPlay muted playsInline preload="auto" onEnded={finish} onError={finish} className="h-full w-full object-cover" src={SPLASH_SRC} />
+      <button onClick={(e)=>{ e.stopPropagation(); finish(); }} className="absolute right-4 rounded-full bg-black/40 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur transition active:scale-95" style={{ top: "calc(env(safe-area-inset-top) + 16px)" }}>Skip ›</button>
+    </div>
+  );
+}
+
 /* ---- home / overview tab ---- */
 function HomeTab({ protocols, insights, onNav }) {
   const comp = insights.find(i=>i.id==="compliance") || {};
@@ -664,6 +679,7 @@ function PeptiSenseDashboard() {
   const [active,setActive]=useState("home");
   const [health,setHealth]=useState(()=>loadHealth());
   const [sheet,setSheet]=useState(null); // 'new' | protocol obj | null
+  const [splash,setSplash]=useState(()=>!!SPLASH_SRC);
 
   const persist = (arr) => { setProtocols(arr); saveProtocols(arr); };
   const logDose = (id) => persist(protocols.map(p=>(p.id===id && p.done<(p.total||0))?{...p,done:p.done+1}:p));
@@ -691,6 +707,7 @@ function PeptiSenseDashboard() {
     </div>
     <BottomNav active={active} onNav={nav} />
     {sheet && <ProtocolSheet editing={sheet} onClose={()=>setSheet(null)} onSave={saveProtocol} onDelete={deleteProtocol} />}
+    {splash && <Splash onDone={()=>setSplash(false)} />}
   </div>;
 }
 
