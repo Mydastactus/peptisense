@@ -31,6 +31,7 @@ function loadHealth() { try { return JSON.parse(localStorage.getItem(HKEY)) || n
 function saveHealth(d) { try { localStorage.setItem(HKEY, JSON.stringify(d)); } catch (e) {} }
 const num = (x) => { const n = parseFloat(x); return isFinite(n) ? n : null; };
 const hoursFrom = (v) => (v == null ? null : (v > 24 ? v / 60 : v));
+const fmtDur = (h) => { if (h == null) return "—"; const m = Math.round(h * 60); const hh = Math.floor(m / 60), mm = m % 60; return hh ? `${hh}h ${mm}m` : `${mm}m`; };
 
 /* ---- primitives ---- */
 function Sparkline({ data, color, height = 34 }) {
@@ -289,6 +290,12 @@ function InsightCard({ item }) {
     <div className="mt-3 flex items-end gap-1"><span className="text-3xl font-extrabold tabular-nums text-white">{item.value}</span>{item.unit && <span className="mb-1 text-sm font-medium text-slate-400">{item.unit}</span>}</div>
     {item.series ? <div className="mt-1"><Sparkline data={item.series} color={a.hex} /></div> : <div className="mt-1 h-[34px]" />}
     <p className="mt-1 text-xs text-slate-500">{item.caption}</p>
+    {item.breakdown && (
+      <div className="mt-2 flex flex-wrap gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#0F172A] px-2 py-1 text-[11px] font-semibold text-slate-300"><span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />Deep {fmtDur(item.breakdown.deep)}</span>
+        <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#0F172A] px-2 py-1 text-[11px] font-semibold text-slate-300"><span className="h-1.5 w-1.5 rounded-full bg-[#00F2FE]" />REM {fmtDur(item.breakdown.rem)}</span>
+      </div>
+    )}
   </Panel>;
 }
 
@@ -309,11 +316,15 @@ function buildInsights(health, protocols) {
   } else out.push({ id:"hrv", label:"HRV", value:"—", unit:"", delta:null, icon:"heart-pulse", accent:"cyan", series:null, caption:"Import Apple Health to see HRV" });
 
   if (health && health.sleep && health.sleep.length) {
-    const s = health.sleep.slice(-7).map((x) => Math.round(x.hours*10)/10);
+    const last = health.sleep.slice(-7);
+    const s = last.map((x) => Math.round(x.hours*10)/10);
     const avg = Math.round((s.reduce((a,b)=>a+b,0)/s.length)*10)/10;
     const val = s[s.length-1], prev = s.length>1 ? s[0] : val;
     const delta = prev ? Math.round(((val-prev)/prev)*100) : null;
-    out.push({ id:"sleep", label:"Sleep", value:val.toFixed(1), unit:"hrs", delta, icon:"moon", accent:"teal", series:s.length>1?s:null, caption:`Avg ${avg}h · Apple Health` });
+    const avgOf = (k) => { const v = last.map(x=>x[k]).filter(n=>n!=null); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : null; };
+    const deep = avgOf("deep"), rem = avgOf("rem");
+    const breakdown = (deep!=null || rem!=null) ? { deep, rem } : null;
+    out.push({ id:"sleep", label:"Sleep", value:val.toFixed(1), unit:"hrs", delta, icon:"moon", accent:"teal", series:s.length>1?s:null, caption:`Avg ${avg}h · Apple Health`, breakdown });
   } else out.push({ id:"sleep", label:"Sleep", value:"—", unit:"", delta:null, icon:"moon", accent:"teal", series:null, caption:"Import Apple Health to see sleep" });
 
   if (protocols.length) {
@@ -378,11 +389,23 @@ function parseHealthFile(text) {
     if (sm && Array.isArray(sm.data)) {
       sm.data.forEach((d) => {
         const date = ((d.date || d.startDate || d.dateComponents || "") + "").slice(0, 10);
-        let asleep = num(d.asleep != null ? d.asleep : (d.totalSleep != null ? d.totalSleep : (d.value != null ? d.value : d.qty)));
-        const stages = ["deep","rem","core","light"].map((k)=>num(d[k])).filter((x)=>x!=null);
-        if (asleep == null && stages.length) asleep = stages.reduce((a,b)=>a+b,0);
-        asleep = hoursFrom(asleep);
-        if (date && asleep != null) sleep.push({ date, hours: asleep });
+        // Prefer the explicit total. Some exports set "asleep" to 0 while the real
+        // nightly total lives in "totalSleep", so try that first, then sum stages.
+        let hrs = num(d.totalSleep);
+        if (hrs == null || hrs === 0) {
+          const stages = ["deep","core","rem","asleep","light"].map((k)=>num(d[k])).filter((x)=>x!=null);
+          if (stages.length) hrs = stages.reduce((a,b)=>a+b,0);
+        }
+        if (hrs == null || hrs === 0) hrs = num(d.value != null ? d.value : d.qty);
+        hrs = hoursFrom(hrs);
+        if (date && hrs != null && hrs > 0) {
+          const rec = { date, hours: hrs };
+          const dp = hoursFrom(num(d.deep)), rm = hoursFrom(num(d.rem)), cr = hoursFrom(num(d.core));
+          if (dp != null) rec.deep = dp;
+          if (rm != null) rec.rem = rm;
+          if (cr != null) rec.core = cr;
+          sleep.push(rec);
+        }
       });
     }
     const hm = find(/heart_rate_variability|hrv|sdnn/);
@@ -419,20 +442,28 @@ function toDateStr(v){ return v ? String(v).slice(0,10) : ""; }
 function parseNativeSleep(raw){
   const arr = Array.isArray(raw) ? raw : (raw && (raw.data||raw.results||raw.samples||raw.value)) || [];
   const byDate = {};
+  const get = (date) => (byDate[date] || (byDate[date] = { date, hours:0, deep:0, rem:0, _d:false, _r:false }));
   (Array.isArray(arr)?arr:[]).forEach((s)=>{
     const date = toDateStr(s.date || s.endDate || s.startDate || s.day);
     if(!date) return;
     const state = String(s.state || s.type || s.category || s.value_type || "asleep").toLowerCase();
     if(/awake|inbed|in_bed|in bed/.test(state)) return; // count time asleep only
     let hours = null;
-    if(s.hours!=null) hours = num(s.hours);
+    if(s.totalSleep!=null) hours = hoursFrom(num(s.totalSleep));
+    else if(s.hours!=null) hours = num(s.hours);
     else if(s.minutes!=null) hours = num(s.minutes)/60;
     else if(s.duration!=null){ let d=num(s.duration); if(d!=null) hours = d>1000 ? d/3600 : (d>24 ? d/60 : d); }
     else hours = hoursFrom(num(s.asleep!=null?s.asleep:s.value));
     if(hours==null) return;
-    byDate[date] = { date, hours: (byDate[date]?byDate[date].hours:0) + hours };
+    const rec = get(date);
+    rec.hours += hours;
+    const dp = hoursFrom(num(s.deep)), rm = hoursFrom(num(s.rem));
+    if(dp!=null){ rec.deep += dp; rec._d=true; }
+    if(rm!=null){ rec.rem += rm; rec._r=true; }
+    if(/deep/.test(state)){ rec.deep += hours; rec._d=true; }
+    if(/rem/.test(state)){ rec.rem += hours; rec._r=true; }
   });
-  return Object.values(byDate).map(x=>({date:x.date, hours:Math.round(x.hours*10)/10})).sort((a,b)=>a.date.localeCompare(b.date));
+  return Object.values(byDate).map(x=>{ const o={date:x.date, hours:Math.round(x.hours*10)/10}; if(x._d) o.deep=x.deep; if(x._r) o.rem=x.rem; return o; }).sort((a,b)=>a.date.localeCompare(b.date));
 }
 function parseNativeHRV(raw){
   const arr = Array.isArray(raw) ? raw : (raw && (raw.data||raw.results||raw.values||raw.value)) || [];
@@ -538,34 +569,28 @@ function ConnectHealthCard({ health, onImport, onClear }) {
 }
 
 /* ---- settings sheet ---- */
-function SettingsSheet({ onClose, onClearAll }) {
+function SettingsTab({ onClearAll }) {
   const [confirm, setConfirm] = useState(false);
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-t-3xl border border-b-0 border-[#30363D] bg-[#161B22] p-5 pb-9" onClick={(e)=>e.stopPropagation()}>
-        <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-[#30363D]" />
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-white">Settings</h3>
-          <button onClick={onClose} aria-label="Close" className="text-slate-400 transition hover:text-white"><Icon name="x" size={20} /></button>
+    <section className="px-5 pt-6">
+      <SectionHeading title="Settings" icon="settings" />
+      <div className="mt-3 space-y-3 text-sm">
+        <div className="flex items-center justify-between rounded-xl border border-[#30363D] bg-[#161B22]/80 px-4 py-3"><span className="text-slate-300">Version</span><span className="font-semibold text-slate-400">PeptiSense 1.0</span></div>
+        <a href="./privacy.html" className="flex items-center justify-between rounded-xl border border-[#30363D] bg-[#161B22]/80 px-4 py-3 text-slate-300 transition hover:text-white"><span>Privacy policy</span><Icon name="chevron-right" size={16} /></a>
+        <div className="rounded-xl border border-[#30363D] bg-[#161B22]/80 px-4 py-3">
+          <p className="text-slate-300">All your data is stored only on this device.</p>
+          {!confirm ? (
+            <button onClick={()=>setConfirm(true)} className="mt-3 w-full rounded-xl border border-red-500/30 py-2.5 text-sm font-semibold text-red-400 transition active:scale-95">Clear all data</button>
+          ) : (
+            <div className="mt-3 flex gap-2">
+              <button onClick={()=>setConfirm(false)} className="flex-1 rounded-xl border border-[#30363D] py-2.5 text-sm font-semibold text-slate-300">Cancel</button>
+              <button onClick={onClearAll} className="flex-1 rounded-xl bg-red-500/90 py-2.5 text-sm font-bold text-white transition active:scale-95">Yes, erase</button>
+            </div>
+          )}
         </div>
-        <div className="mt-4 space-y-3 text-sm">
-          <div className="flex items-center justify-between rounded-xl border border-[#30363D] bg-[#0F172A] px-4 py-3"><span className="text-slate-300">Version</span><span className="font-semibold text-slate-400">PeptiSense 1.0</span></div>
-          <a href="./privacy.html" className="flex items-center justify-between rounded-xl border border-[#30363D] bg-[#0F172A] px-4 py-3 text-slate-300 transition hover:text-white"><span>Privacy policy</span><Icon name="chevron-right" size={16} /></a>
-          <div className="rounded-xl border border-[#30363D] bg-[#0F172A] px-4 py-3">
-            <p className="text-slate-300">All your data is stored only on this device.</p>
-            {!confirm ? (
-              <button onClick={()=>setConfirm(true)} className="mt-3 w-full rounded-xl border border-red-500/30 py-2.5 text-sm font-semibold text-red-400 transition active:scale-95">Clear all data</button>
-            ) : (
-              <div className="mt-3 flex gap-2">
-                <button onClick={()=>setConfirm(false)} className="flex-1 rounded-xl border border-[#30363D] py-2.5 text-sm font-semibold text-slate-300">Cancel</button>
-                <button onClick={onClearAll} className="flex-1 rounded-xl bg-red-500/90 py-2.5 text-sm font-bold text-white transition active:scale-95">Yes, erase</button>
-              </div>
-            )}
-          </div>
-          <p className="px-1 text-xs leading-relaxed text-slate-500">PeptiSense is an informational tool, not medical advice. Always confirm dosing and consult a qualified professional.</p>
-        </div>
+        <p className="px-1 text-xs leading-relaxed text-slate-500">PeptiSense is an informational tool, not medical advice. Always confirm dosing and consult a qualified professional.</p>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -591,12 +616,54 @@ function BottomNav({ active, onNav }) {
   </nav>;
 }
 
+/* ---- home / overview tab ---- */
+function HomeTab({ protocols, insights, onNav }) {
+  const comp = insights.find(i=>i.id==="compliance") || {};
+  const sleep = insights.find(i=>i.id==="sleep") || {};
+  const nextP = protocols.find(p=>p.next && String(p.next).trim());
+  const tiles = [
+    { label:"Protocols", sub: protocols.length?"active":"none yet", value:String(protocols.length), icon:"clipboard-list", tab:"protocols", accent:"cyan", big:true },
+    { label:"Compliance", sub:"this week", value: comp.value==="—"?"—":`${comp.value}%`, icon:"target", tab:"insights", accent:"blue", big:true },
+    { label:"Last sleep", sub: sleep.value==="—"?"no data":"latest night", value: sleep.value==="—"?"—":`${sleep.value}h`, icon:"moon", tab:"insights", accent:"teal", big:true },
+    { label:"Next dose", sub: nextP?nextP.name:"not set", value: nextP?nextP.next:"—", icon:"clock", tab:"protocols", accent:"cyan", big:false },
+  ];
+  return (
+    <div>
+      <CalloutBanner />
+      <section className="px-5 pt-6">
+        <SectionHeading title="Today at a glance" />
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          {tiles.map((t)=>{ const a=ACCENTS[t.accent]; return (
+            <button key={t.label} onClick={()=>onNav(t.tab)} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-4 text-left transition active:scale-[0.98]">
+              <span className={`inline-grid h-8 w-8 place-items-center rounded-lg ${a.soft} ${a.text}`}><Icon name={t.icon} size={16} /></span>
+              <div className={`mt-3 truncate font-extrabold text-white ${t.big?"text-2xl":"text-base"}`}>{t.value}</div>
+              <div className="mt-0.5 truncate text-[11px] text-slate-500">{t.label} · {t.sub}</div>
+            </button>
+          );})}
+        </div>
+      </section>
+      {protocols.length===0 && (
+        <section className="px-5 pt-4">
+          <Panel className="p-5 text-center">
+            <p className="font-semibold text-white">Welcome to PeptiSense</p>
+            <p className="mx-auto mt-1 max-w-xs text-sm text-slate-400">Add a protocol and connect Apple Health to fill in your dashboard.</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <button onClick={()=>onNav("protocols")} className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#00F2FE] to-[#3B82F6] px-4 py-2.5 text-sm font-bold text-[#04121a] transition active:scale-95"><Icon name="plus" size={16} stroke={2.6}/> Add protocol</button>
+              <button onClick={()=>onNav("insights")} className="rounded-xl border border-[#30363D] px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:text-white">Connect Health</button>
+            </div>
+          </Panel>
+        </section>
+      )}
+    </div>
+  );
+}
+
 /* ---- root ---- */
 function PeptiSenseDashboard() {
   const [protocols,setProtocols]=useState(()=>loadProtocols());
   const [active,setActive]=useState("home");
   const [health,setHealth]=useState(()=>loadHealth());
-  const [sheet,setSheet]=useState(null); // 'new' | protocol obj | 'settings' | null
+  const [sheet,setSheet]=useState(null); // 'new' | protocol obj | null
 
   const persist = (arr) => { setProtocols(arr); saveProtocols(arr); };
   const logDose = (id) => persist(protocols.map(p=>(p.id===id && p.done<(p.total||0))?{...p,done:p.done+1}:p));
@@ -604,17 +671,10 @@ function PeptiSenseDashboard() {
   const deleteProtocol = (id) => { persist(protocols.filter(p=>p.id!==id)); setSheet(null); };
   const importHealth = (d) => { setHealth(d); saveHealth(d); };
   const clearHealth = () => { setHealth(null); try{ localStorage.removeItem(HKEY); }catch(e){} };
-  const clearAll = () => { persist([]); clearHealth(); setSheet(null); };
+  const clearAll = () => { persist([]); clearHealth(); };
 
   const insights = buildInsights(health, protocols);
-  const nav = (id) => {
-    setActive(id);
-    if (id==="settings") { setSheet("settings"); return; }
-    const map = { home:null, protocols:"protocols", calculator:"calculator", insights:"insights" };
-    const target = map[id] ? document.getElementById(map[id]) : null;
-    if (target) target.scrollIntoView({ behavior:"smooth", block:"start" });
-    else window.scrollTo({ top:0, behavior:"smooth" });
-  };
+  const nav = (id) => { setActive(id); if (typeof window!=="undefined") window.scrollTo({ top:0, behavior:"smooth" }); };
 
   return <div className="min-h-screen bg-[#0F172A] text-white">
     <div className="pointer-events-none fixed inset-0 -z-10">
@@ -622,16 +682,15 @@ function PeptiSenseDashboard() {
       <div className="absolute right-0 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[120px]" />
     </div>
     <div className="mx-auto max-w-3xl pb-4">
-      <Header onProfile={()=>setSheet("settings")} />
-      <CalloutBanner />
-      <ActiveProtocols protocols={protocols} onLog={logDose} onEdit={(p)=>setSheet(p)} onAdd={()=>setSheet("new")} />
-      <ConnectHealthCard health={health} onImport={importHealth} onClear={clearHealth} />
-      <BioSenseInsights items={insights} />
-      <CalculatorCard />
+      <Header onProfile={()=>nav("settings")} />
+      {active==="home" && <HomeTab protocols={protocols} insights={insights} onNav={nav} />}
+      {active==="protocols" && <ActiveProtocols protocols={protocols} onLog={logDose} onEdit={(p)=>setSheet(p)} onAdd={()=>setSheet("new")} />}
+      {active==="calculator" && <CalculatorCard />}
+      {active==="insights" && <><ConnectHealthCard health={health} onImport={importHealth} onClear={clearHealth} /><BioSenseInsights items={insights} /></>}
+      {active==="settings" && <SettingsTab onClearAll={clearAll} />}
     </div>
     <BottomNav active={active} onNav={nav} />
-    {sheet && sheet!=="settings" && <ProtocolSheet editing={sheet} onClose={()=>setSheet(null)} onSave={saveProtocol} onDelete={deleteProtocol} />}
-    {sheet==="settings" && <SettingsSheet onClose={()=>setSheet(null)} onClearAll={clearAll} />}
+    {sheet && <ProtocolSheet editing={sheet} onClose={()=>setSheet(null)} onSave={saveProtocol} onDelete={deleteProtocol} />}
   </div>;
 }
 
