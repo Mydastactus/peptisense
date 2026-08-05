@@ -153,31 +153,36 @@ function ProtocolCard({ p, onLog, onEdit }) {
   </Panel>;
 }
 
-function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
+/* ---- reusable coverflow carousel: cards rotate/overlap around the center ---- */
+function Coverflow({ items, renderCard, keyOf }) {
   const scroller = useRef(null);
   const raf = useRef(0);
   const idxRef = useRef(0);
   const [idx, setIdx] = useState(0);
-  const [cardW, setCardW] = useState(300);
+  const [cardW, setCardW] = useState(260);
 
-  // coverflow: rotate/scale each card by its distance from the viewport center
   const update = () => {
     const el = scroller.current; if (!el) return;
     const mid = el.getBoundingClientRect().left + el.clientWidth / 2;
-    const cards = el.querySelectorAll("[data-card]");
+    const cards = el.querySelectorAll("[data-cf]");
     let best = 0, bestDist = Infinity;
     cards.forEach((c, i) => {
       const r = c.getBoundingClientRect();
       const cc = r.left + r.width / 2;
-      const delta = r.width ? (cc - mid) / r.width : 0;
-      const cl = Math.max(-1.6, Math.min(1.6, delta));
-      const abs = Math.min(Math.abs(cl), 1);
+      const delta = r.width ? (cc - mid) / r.width : 0;       // ~ -1 = one card left, +1 = one right
+      const cl = Math.max(-2.4, Math.min(2.4, delta));
+      const abs = Math.abs(cl), a1 = Math.min(abs, 1);
       const inner = c.children[0];
       if (inner) {
-        inner.style.transform = `rotateY(${-cl * 46}deg) scale(${1 - abs * 0.16})`;
-        inner.style.opacity = String(1 - abs * 0.45);
+        const pull = r.width * 0.30;                          // slide neighbours toward centre so they overlap
+        const rot = Math.max(-56, Math.min(56, -cl * 52));
+        const scale = Math.max(0.70, 1 - a1 * 0.14 - Math.max(abs - 1, 0) * 0.05);
+        const op = Math.max(0.25, 1 - a1 * 0.08 - Math.max(abs - 1, 0) * 0.5);
+        inner.style.transform = `translateX(${-cl * pull}px) rotateY(${rot}deg) scale(${scale})`;
+        inner.style.opacity = String(op);
+        inner.style.pointerEvents = abs < 0.5 ? "auto" : "none"; // only the focused card is tappable
       }
-      c.style.zIndex = String(100 - Math.round(abs * 100));
+      c.style.zIndex = String(1000 - Math.round(abs * 100));
       const d = Math.abs(cc - mid);
       if (d < bestDist) { bestDist = d; best = i; }
     });
@@ -187,26 +192,52 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
   const layout = () => {
     const el = scroller.current; if (!el) return;
     const w = el.clientWidth;
-    const cw = Math.max(240, Math.min(Math.round(w * 0.76), 440));
-    const pad = Math.max(Math.round((w - cw) / 2), 12);
+    const cw = Math.max(230, Math.min(Math.round(w * 0.62), 340));
+    const pad = Math.max(Math.round((w - cw) / 2), 8);
     el.style.paddingLeft = pad + "px";
     el.style.paddingRight = pad + "px";
     setCardW(cw);
   };
 
   useEffect(() => { layout(); const onR = () => { layout(); requestAnimationFrame(update); }; window.addEventListener("resize", onR); return () => window.removeEventListener("resize", onR); }, []);
-  useEffect(() => { const t = requestAnimationFrame(update); return () => cancelAnimationFrame(t); }, [cardW, protocols.length]);
+  useEffect(() => { const t = requestAnimationFrame(update); return () => cancelAnimationFrame(t); }, [cardW, items.length]);
 
   const onScroll = () => { cancelAnimationFrame(raf.current); raf.current = requestAnimationFrame(update); };
-
   const goTo = (i) => {
     const el = scroller.current; if (!el) return;
-    const cards = el.querySelectorAll("[data-card]");
+    const cards = el.querySelectorAll("[data-cf]");
     const c = cards[Math.max(0, Math.min(i, cards.length - 1))]; if (!c) return;
     const r = c.getBoundingClientRect(); const er = el.getBoundingClientRect();
     el.scrollTo({ left: el.scrollLeft + (r.left + r.width / 2) - (er.left + el.clientWidth / 2), behavior: "smooth" });
   };
 
+  return (
+    <div>
+      <div className="relative">
+        <div ref={scroller} onScroll={onScroll} className="no-scrollbar flex snap-x snap-mandatory overflow-x-auto py-8">
+          {items.map((it, i) => (
+            <div key={keyOf ? keyOf(it, i) : i} data-cf className="shrink-0 snap-center" style={{ width: cardW, perspective: "1000px" }}>
+              <div style={{ transformOrigin: "center center", transition: "transform .08s ease-out, opacity .08s ease-out", willChange: "transform" }}>
+                {renderCard(it, i)}
+              </div>
+            </div>
+          ))}
+        </div>
+        {idx > 0 && <button onClick={() => goTo(idx - 1)} aria-label="Previous" className="absolute left-2 top-1/2 z-[1100] hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-left" size={18} /></button>}
+        {idx < items.length - 1 && <button onClick={() => goTo(idx + 1)} aria-label="Next" className="absolute right-2 top-1/2 z-[1100] hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-right" size={18} /></button>}
+      </div>
+      {items.length > 1 && (
+        <div className="mt-1 flex justify-center gap-1.5">
+          {items.map((_, i) => (
+            <button key={i} onClick={() => goTo(i)} aria-label={`Card ${i + 1}`} className={`h-1.5 rounded-full transition-all ${i === idx ? "w-5 bg-[#00F2FE] shadow-[0_0_8px_#00F2FE]" : "w-1.5 bg-slate-600 hover:bg-slate-500"}`} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
   return (
     <section id="protocols" className="pt-6">
       <div className="flex items-center justify-between px-5">
@@ -216,7 +247,6 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
         </div>
         <button onClick={onAdd} className="inline-flex items-center gap-1 rounded-lg bg-[#00F2FE]/10 px-2.5 py-1.5 text-xs font-bold text-[#00F2FE] transition active:scale-95"><Icon name="plus" size={14} stroke={2.6} /> Add</button>
       </div>
-
       {protocols.length === 0 ? (
         <div className="mt-3 px-5">
           <Panel className="p-7 text-center">
@@ -227,32 +257,9 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
           </Panel>
         </div>
       ) : (
-        <>
-          <div className="relative mt-2">
-            <div ref={scroller} onScroll={onScroll} className="no-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto py-8">
-              {protocols.map((p) => (
-                <div key={p.id} data-card className="shrink-0 snap-center" style={{ width: cardW, perspective: "1000px" }}>
-                  <div style={{ transformOrigin: "center center", transition: "transform .1s ease-out, opacity .1s ease-out", willChange: "transform" }}>
-                    <ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            {idx > 0 && (
-              <button onClick={() => goTo(idx - 1)} aria-label="Previous" className="absolute left-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-left" size={18} /></button>
-            )}
-            {idx < protocols.length - 1 && (
-              <button onClick={() => goTo(idx + 1)} aria-label="Next" className="absolute right-2 top-1/2 hidden h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[#30363D] bg-[#161B22]/90 text-slate-300 backdrop-blur transition hover:text-white sm:grid"><Icon name="chevron-right" size={18} /></button>
-            )}
-          </div>
-          {protocols.length > 1 && (
-            <div className="mt-1 flex justify-center gap-1.5">
-              {protocols.map((_, i) => (
-                <button key={i} onClick={() => goTo(i)} aria-label={`Protocol ${i + 1}`} className={`h-1.5 rounded-full transition-all ${i === idx ? "w-5 bg-[#00F2FE] shadow-[0_0_8px_#00F2FE]" : "w-1.5 bg-slate-600 hover:bg-slate-500"}`} />
-              ))}
-            </div>
-          )}
-        </>
+        <div className="mt-1">
+          <Coverflow items={protocols} keyOf={(p)=>p.id} renderCard={(p)=><ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />} />
+        </div>
       )}
     </section>
   );
@@ -643,7 +650,7 @@ const NAV = [
   { id:"settings", label:"Settings", icon:"settings" },
 ];
 function BottomNav({ active, onNav }) {
-  return <nav className="sticky bottom-0 z-30 mt-8 border-t border-[#30363D] bg-[#0F172A]/85 backdrop-blur-xl">
+  return <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#30363D] bg-[#0F172A]/90 backdrop-blur-xl">
     <div className="mx-auto flex max-w-3xl items-center justify-around px-2 py-2">
       {NAV.map(n=>{
         const on = active===n.id;
@@ -672,38 +679,61 @@ function Splash({ onDone }) {
 }
 
 /* ---- home / overview tab ---- */
+/* ---- big metric card (used in the Home coverflow deck) ---- */
+function MetricCard({ item, onOpen }) {
+  const a = ACCENTS[item.accent] || ACCENTS.cyan;
+  const big = String(item.value).length <= 5;
+  return (
+    <div onClick={onOpen}
+      className="flex h-[300px] cursor-pointer flex-col rounded-3xl border p-6 shadow-[0_12px_40px_rgba(0,0,0,0.5)] transition active:scale-[0.98]"
+      style={{ borderColor: a.raw + "55", background: `linear-gradient(160deg, ${a.raw}26, #141b26 62%)` }}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ background: a.raw + "26", color: a.raw }}><Icon name={item.icon} size={20} /></span>
+          <span className="text-base font-semibold text-white">{item.label}</span>
+        </div>
+        {item.delta != null && <DeltaBadge delta={item.delta} />}
+      </div>
+      <div className="mt-6 flex items-end gap-1.5">
+        <span className={`font-extrabold tracking-tight text-white ${big ? "text-5xl" : "text-2xl leading-tight"}`}>{item.value}</span>
+        {item.unit && <span className="mb-1.5 text-lg font-semibold text-slate-300">{item.unit}</span>}
+      </div>
+      {item.sub && <div className="mt-1.5 text-sm text-slate-400">{item.sub}</div>}
+      <div className="mt-auto">
+        {item.breakdown && (
+          <div className="mb-3 flex gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#0F172A]/70 px-2 py-1 text-[11px] font-semibold text-slate-300"><span className="h-1.5 w-1.5 rounded-full bg-[#3B82F6]" />Deep {fmtDur(item.breakdown.deep)}</span>
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#30363D] bg-[#0F172A]/70 px-2 py-1 text-[11px] font-semibold text-slate-300"><span className="h-1.5 w-1.5 rounded-full bg-[#00F2FE]" />REM {fmtDur(item.breakdown.rem)}</span>
+          </div>
+        )}
+        {item.series && <Sparkline data={item.series} color={a.hex} height={46} />}
+        {item.bar != null && <div className="h-2.5 w-full overflow-hidden rounded-full bg-[#0F172A]"><div className="h-full rounded-full" style={{ width: `${Math.max(item.bar, 2)}%`, background: `linear-gradient(90deg, ${ACCENTS.blue.raw}, ${ACCENTS.cyan.raw})` }} /></div>}
+      </div>
+    </div>
+  );
+}
+
 function HomeTab({ protocols, insights, onNav }) {
-  const comp = insights.find(i=>i.id==="compliance") || {};
   const sleep = insights.find(i=>i.id==="sleep") || {};
+  const hrv = insights.find(i=>i.id==="hrv") || {};
+  const comp = insights.find(i=>i.id==="compliance") || {};
   const nextP = protocols.find(p=>p.next && String(p.next).trim());
-  const sleepSeries = sleep.series && sleep.series.length > 1 ? sleep.series : null;
-  const sleepAvg = sleepSeries ? Math.round((sleepSeries.reduce((a,b)=>a+b,0)/sleepSeries.length)*10)/10 : null;
   const compPct = comp.value === "—" ? null : (parseInt(comp.value) || 0);
-  const tiles = [
-    { key:"protocols", label:"Protocols", sub: protocols.length?"active":"none yet", value:String(protocols.length), icon:"clipboard-list", tab:"protocols", accent:"cyan", big:true },
-    { key:"compliance", label:"Compliance", sub:"this week", value: compPct==null?"—":`${compPct}%`, icon:"target", tab:"insights", accent:"blue", big:true, bar:compPct },
-    { key:"sleep", label:"Sleep", sub: sleepAvg!=null?`avg ${sleepAvg}h`:"no data yet", value: sleep.value==="—"?"—":`${sleep.value}h`, icon:"moon", tab:"insights", accent:"teal", big:true, spark:sleepSeries },
-    { key:"next", label:"Next dose", sub: nextP?nextP.name:"not set", value: nextP?nextP.next:"—", icon:"clock", tab:"protocols", accent:"cyan", big:false },
+  const deck = [
+    { ...sleep, tab:"insights", sub: sleep.value==="—" ? "Import Apple Health" : sleep.caption },
+    { ...comp, tab:"insights", series:null, bar: compPct, sub: compPct==null ? "Add protocols to track" : "this week's dose adherence" },
+    { ...hrv, tab:"insights", sub: hrv.value==="—" ? "Import Apple Health" : hrv.caption },
+    { id:"next", tab:"protocols", accent:"cyan", icon:"clock", label:"Next dose", value: nextP ? nextP.next : "—", unit:"", delta:null, series:null, breakdown:null, bar:null, sub: nextP ? `${nextP.name} · ${nextP.dose}` : "nothing scheduled" },
   ];
   return (
     <div>
       <CalloutBanner />
-      <section className="px-5 pt-6">
-        <SectionHeading title="Today at a glance" />
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          {tiles.map((t)=>{ const a=ACCENTS[t.accent]; return (
-            <button key={t.key} onClick={()=>onNav(t.tab)} className="flex min-h-[132px] flex-col rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-4 text-left transition active:scale-[0.98]">
-              <span className={`inline-grid h-8 w-8 place-items-center rounded-lg ${a.soft} ${a.text}`}><Icon name={t.icon} size={16} /></span>
-              <div className={`mt-3 truncate font-extrabold text-white ${t.big?"text-2xl":"text-base"}`}>{t.value}</div>
-              <div className="mt-0.5 truncate text-[11px] text-slate-500">{t.label} · {t.sub}</div>
-              {t.spark && <div className="mt-auto pt-2"><Sparkline data={t.spark} color={a.hex} height={26} /></div>}
-              {t.bar!=null && <div className="mt-auto pt-3"><div className="h-1.5 w-full overflow-hidden rounded-full bg-[#0F172A]"><div className="h-full rounded-full bg-gradient-to-r from-[#3B82F6] to-[#00F2FE]" style={{width:`${Math.max(t.bar,2)}%`}} /></div></div>}
-            </button>
-          );})}
-        </div>
-      </section>
+      <div className="px-5 pt-6"><SectionHeading title="Today at a glance" /></div>
+      <div className="mt-1">
+        <Coverflow items={deck} keyOf={(d)=>d.id} renderCard={(d)=><MetricCard item={d} onOpen={()=>onNav(d.tab)} />} />
+      </div>
       {protocols.length===0 && (
-        <section className="px-5 pt-4">
+        <section className="px-5 pt-2">
           <Panel className="p-5 text-center">
             <p className="font-semibold text-white">Welcome to PeptiSense</p>
             <p className="mx-auto mt-1 max-w-xs text-sm text-slate-400">Add a protocol and connect Apple Health to fill in your dashboard.</p>
@@ -742,7 +772,7 @@ function PeptiSenseDashboard() {
       <div className="absolute -left-32 top-0 h-72 w-72 rounded-full bg-[#00F2FE]/10 blur-[120px]" />
       <div className="absolute right-0 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[120px]" />
     </div>
-    <div className="mx-auto max-w-3xl pb-4">
+    <div className="mx-auto max-w-3xl" style={{ paddingBottom: "calc(92px + env(safe-area-inset-bottom))" }}>
       <Header onProfile={()=>nav("settings")} />
       {active==="home" && <HomeTab protocols={protocols} insights={insights} onNav={nav} />}
       {active==="protocols" && <ActiveProtocols protocols={protocols} onLog={logDose} onEdit={(p)=>setSheet(p)} onAdd={()=>setSheet("new")} />}
