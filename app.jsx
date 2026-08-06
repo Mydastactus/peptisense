@@ -29,6 +29,34 @@ function saveProtocols(a){ try{ localStorage.setItem(PKEY, JSON.stringify(a)); }
 const HKEY = "peptisense_health_v1";
 function loadHealth() { try { return JSON.parse(localStorage.getItem(HKEY)) || null; } catch (e) { return null; } }
 function saveHealth(d) { try { localStorage.setItem(HKEY, JSON.stringify(d)); } catch (e) {} }
+
+const PROFKEY = "peptisense_profile_v1";
+const DEFAULT_PROFILE = { name:"", photo:"", weight:"", weightUnit:"lb", height:"", heightUnit:"in", age:"", sex:"", bodyFat:"", activity:"moderate", goalWeight:"", goalAdherence:"", goalSleep:"", cycleWeeks:"", weightLog:[] };
+function loadProfile(){ try{ return { ...DEFAULT_PROFILE, ...(JSON.parse(localStorage.getItem(PROFKEY)) || {}) }; }catch(e){ return { ...DEFAULT_PROFILE }; } }
+function saveProfile(p){ try{ localStorage.setItem(PROFKEY, JSON.stringify(p)); }catch(e){} }
+function initialsOf(name){ const n=(name||"").trim(); if(!n) return ""; const parts=n.split(/\s+/); return (parts[0][0]+(parts[1]?parts[1][0]:"")).toUpperCase(); }
+
+const ACTIVITY = { sedentary:1.2, light:1.375, moderate:1.55, active:1.725, athlete:1.9 };
+function bmiCategory(b){ if(b<18.5) return {label:"Underweight", color:"#ffb020"}; if(b<25) return {label:"Normal", color:"#3ddc97"}; if(b<30) return {label:"Overweight", color:"#ffb020"}; return {label:"Obese", color:"#ff5c6c"}; }
+// BMI + maintenance (Mifflin-St Jeor TDEE) + 20% cut, from profile body stats
+function bodyMetrics(p){
+  const w=num(p.weight), h=num(p.height), age=num(p.age);
+  if(w==null || h==null || w<=0 || h<=0) return null;
+  const kg = p.weightUnit==="kg" ? w : w*0.45359237;
+  const cm = p.heightUnit==="cm" ? h : h*2.54;
+  const m = cm/100;
+  const bmi = kg/(m*m);
+  let tdee=null, cut=null, bmr=null;
+  if(age!=null && age>0){
+    const base = 10*kg + 6.25*cm - 5*age;
+    bmr = p.sex==="Male" ? base+5 : (p.sex==="Female" ? base-161 : base-78); // sex unset → average
+    const act = ACTIVITY[p.activity] || ACTIVITY.moderate;
+    tdee = Math.round(bmr*act);
+    cut = Math.round(tdee*0.8);
+  }
+  return { bmi: Math.round(bmi*10)/10, cat: bmiCategory(bmi), tdee, cut, bmr: bmr!=null?Math.round(bmr):null, needAge: age==null||age<=0 };
+}
+
 const num = (x) => { const n = parseFloat(x); return isFinite(n) ? n : null; };
 const hoursFrom = (v) => (v == null ? null : (v > 24 ? v / 60 : v));
 const fmtDur = (h) => { if (h == null) return "—"; const m = Math.round(h * 60); const hh = Math.floor(m / 60), mm = m % 60; return hh ? `${hh}h ${mm}m` : `${mm}m`; };
@@ -86,8 +114,10 @@ function Field({ label, children }) {
 const inputCls = "w-full rounded-xl border border-[#30363D] bg-[#0F172A] px-3 py-2.5 text-sm font-semibold text-white outline-none focus:border-[#00F2FE]/50";
 
 /* ---- header ---- */
-function Header({ onProfile }) {
+function Header({ onProfile, profile }) {
   const today = new Date().toLocaleDateString(undefined,{weekday:"long",month:"short",day:"numeric"});
+  const initials = profile ? initialsOf(profile.name) : "";
+  const firstName = profile && profile.name ? String(profile.name).trim().split(/\s+/)[0] : "";
   return <header className="flex items-center justify-between px-5 pt-6 pb-2">
     <div className="flex items-center gap-3">
       <div className="relative grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-[#00F2FE] to-[#3B82F6] shadow-[0_0_24px_-2px_rgba(0,242,254,0.7)]">
@@ -96,15 +126,17 @@ function Header({ onProfile }) {
       </div>
       <div>
         <h1 className="text-[15px] font-extrabold tracking-[0.22em] text-white">PEPTISENSE</h1>
-        <p className="text-xs text-slate-400">{today}</p>
+        <p className="text-xs text-slate-400">{firstName ? `Hi ${firstName} · ${today}` : today}</p>
       </div>
     </div>
     <div className="flex items-center gap-3">
       <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[#14B8A6]/30 bg-[#14B8A6]/10 px-3 py-1 text-xs font-semibold text-[#14B8A6]">
         <Icon name="shield-check" size={13} /> Private
       </span>
-      <button onClick={onProfile} aria-label="Settings" className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-[#14B8A6] to-[#3B82F6] text-[#04121a] ring-2 ring-[#00F2FE]/40 transition active:scale-95">
-        <Icon name="user" size={20} stroke={2.4} />
+      <button onClick={onProfile} aria-label="Profile" className="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-[#00F2FE]/40 transition active:scale-95">
+        {profile && profile.photo
+          ? <img src={profile.photo} alt="" className="h-full w-full object-cover" />
+          : <span className="grid h-full w-full place-items-center bg-gradient-to-br from-[#14B8A6] to-[#3B82F6] text-sm font-extrabold text-[#04121a]">{initials || <Icon name="user" size={20} stroke={2.4} />}</span>}
       </button>
     </div>
   </header>;
@@ -715,22 +747,47 @@ function MetricCard({ item, onOpen }) {
   );
 }
 
-function HomeTab({ protocols, insights, onNav }) {
+function HomeTab({ protocols, insights, profile, onNav }) {
   const sleep = insights.find(i=>i.id==="sleep") || {};
   const hrv = insights.find(i=>i.id==="hrv") || {};
   const comp = insights.find(i=>i.id==="compliance") || {};
   const nextP = protocols.find(p=>p.next && String(p.next).trim());
   const compPct = comp.value === "—" ? null : (parseInt(comp.value) || 0);
+  const wlog = (profile && profile.weightLog) || [];
+  const wSeries = wlog.slice(-8).map(x=>x.weight);
+  const latestW = wlog.length ? wlog[wlog.length-1].weight : null;
+  const wUnit = (profile && profile.weightUnit) || "lb";
+  const metrics = bodyMetrics(profile || {});
   const deck = [
     { ...sleep, tab:"insights", sub: sleep.value==="—" ? "Import Apple Health" : sleep.caption },
     { ...comp, tab:"insights", series:null, bar: compPct, sub: compPct==null ? "Add protocols to track" : "this week's dose adherence" },
     { ...hrv, tab:"insights", sub: hrv.value==="—" ? "Import Apple Health" : hrv.caption },
+    { id:"weight", tab:"profile", accent:"blue", icon:"scale", label:"Weight", value: latestW!=null ? String(latestW) : "—", unit: latestW!=null ? wUnit : "", delta:null, series: wSeries.length>1 ? wSeries : null, breakdown:null, bar:null, sub: (profile && profile.goalWeight) ? `goal ${profile.goalWeight} ${wUnit}` : (latestW!=null ? "latest entry" : "add in profile") },
     { id:"next", tab:"protocols", accent:"cyan", icon:"clock", label:"Next dose", value: nextP ? nextP.next : "—", unit:"", delta:null, series:null, breakdown:null, bar:null, sub: nextP ? `${nextP.name} · ${nextP.dose}` : "nothing scheduled" },
   ];
   return (
     <div className="flex flex-1 flex-col">
       <CalloutBanner />
       <div className="px-5 pt-6"><SectionHeading title="Today at a glance" /></div>
+      {metrics && (
+        <div className="grid grid-cols-3 gap-3 px-5 pt-3">
+          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
+            <div className="text-xl font-extrabold text-white">{metrics.bmi}</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">BMI</div>
+            <div className="text-[10px] font-semibold" style={{ color: metrics.cat.color }}>{metrics.cat.label}</div>
+          </button>
+          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
+            <div className="text-xl font-extrabold text-[#3ddc97]">{metrics.tdee || "—"}</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">Maintain</div>
+            <div className="text-[10px] text-slate-400">kcal</div>
+          </button>
+          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
+            <div className="text-xl font-extrabold text-[#00F2FE]">{metrics.cut || "—"}</div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-500">Cut −20%</div>
+            <div className="text-[10px] text-slate-400">kcal</div>
+          </button>
+        </div>
+      )}
       <div className="flex flex-1 items-center">
         <div className="w-full">
           <Coverflow items={deck} keyOf={(d)=>d.id} renderCard={(d)=><MetricCard item={d} onOpen={()=>onNav(d.tab)} />} />
@@ -752,11 +809,158 @@ function HomeTab({ protocols, insights, onNav }) {
   );
 }
 
+/* ---- profile / account screen ---- */
+function ProfileScreen({ profile, onSave, onClose, onOpenSettings }) {
+  const [p, setP] = useState(profile);
+  const [w, setW] = useState("");
+  const photoRef = useRef();
+  const set = (k, v) => setP(prev => ({ ...prev, [k]: v }));
+  const savePhoto = (e) => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => set("photo", String(r.result)); r.readAsDataURL(f); e.target.value = ""; };
+  const addWeight = () => {
+    const val = num(w); if (val == null) return;
+    const date = new Date().toISOString().slice(0, 10);
+    const log = [...(p.weightLog || []).filter(x => x.date !== date), { date, weight: val }].sort((a, b) => a.date.localeCompare(b.date));
+    setP(prev => ({ ...prev, weightLog: log, weight: String(val) })); setW("");
+  };
+  const save = () => { onSave(p); onClose(); };
+  const wlog = p.weightLog || [];
+  const series = wlog.slice(-12).map(x => x.weight);
+  const initials = initialsOf(p.name);
+  const metrics = bodyMetrics(p);
+  return (
+    <div className="flex flex-1 flex-col pb-2">
+      <div className="flex items-center justify-between px-5 pt-2">
+        <button onClick={onClose} className="flex items-center gap-1 text-sm font-semibold text-slate-300 transition hover:text-white"><Icon name="chevron-left" size={18} /> Back</button>
+        <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-slate-300">Profile</h2>
+        <button onClick={save} className="text-sm font-bold text-[#00F2FE]">Save</button>
+      </div>
+
+      <div className="flex flex-col items-center px-5 pt-5">
+        <button onClick={() => photoRef.current.click()} className="relative h-24 w-24 overflow-hidden rounded-full ring-2 ring-[#00F2FE]/40 transition active:scale-95">
+          {p.photo ? <img src={p.photo} className="h-full w-full object-cover" alt="" /> : <span className="grid h-full w-full place-items-center bg-gradient-to-br from-[#14B8A6] to-[#3B82F6] text-2xl font-extrabold text-[#04121a]">{initials || <Icon name="user" size={40} />}</span>}
+          <span className="absolute bottom-0 right-0 grid h-7 w-7 place-items-center rounded-full border-2 border-[#0F172A] bg-[#00F2FE] text-[#04121a]"><Icon name="pencil" size={13} stroke={2.6} /></span>
+        </button>
+        <input ref={photoRef} type="file" accept="image/*" onChange={savePhoto} className="hidden" />
+        <input value={p.name} onChange={e => set("name", e.target.value)} placeholder="Your name" className="mt-3 w-56 rounded-xl border border-[#30363D] bg-[#161B22] px-3 py-2 text-center text-base font-semibold text-white outline-none focus:border-[#00F2FE]/50" />
+      </div>
+
+      <section className="px-5 pt-6">
+        <Panel className="flex items-center justify-between p-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#3B82F6]/15 text-[#3B82F6]"><Icon name="cloud" size={18} /></span>
+            <div><p className="text-sm font-semibold text-white">Cloud sync</p><p className="text-xs text-slate-400">Saved on this device · not synced yet</p></div>
+          </div>
+          <span className="rounded-full bg-slate-500/15 px-2.5 py-1 text-xs font-semibold text-slate-400">Local</span>
+        </Panel>
+      </section>
+
+      <section className="px-5 pt-6">
+        <SectionHeading title="Body stats" />
+        <Panel className="mt-3 p-4">
+          <div className="flex gap-3">
+            <div className="flex-1"><Field label="Weight"><input type="number" value={p.weight} onChange={e => set("weight", e.target.value)} className={inputCls} placeholder="180" /></Field></div>
+            <div className="w-24"><Field label="Unit"><select value={p.weightUnit} onChange={e => set("weightUnit", e.target.value)} className={inputCls}><option>lb</option><option>kg</option></select></Field></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><Field label="Height"><input type="number" value={p.height} onChange={e => set("height", e.target.value)} className={inputCls} placeholder="70" /></Field></div>
+            <div className="w-24"><Field label="Unit"><select value={p.heightUnit} onChange={e => set("heightUnit", e.target.value)} className={inputCls}><option>in</option><option>cm</option></select></Field></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><Field label="Age"><input type="number" value={p.age} onChange={e => set("age", e.target.value)} className={inputCls} placeholder="35" /></Field></div>
+            <div className="flex-1"><Field label="Sex"><select value={p.sex} onChange={e => set("sex", e.target.value)} className={inputCls}><option value="">—</option><option>Male</option><option>Female</option></select></Field></div>
+            <div className="flex-1"><Field label="Body fat %"><input type="number" value={p.bodyFat} onChange={e => set("bodyFat", e.target.value)} className={inputCls} placeholder="opt" /></Field></div>
+          </div>
+          <Field label="Activity level"><select value={p.activity} onChange={e => set("activity", e.target.value)} className={inputCls}>
+            <option value="sedentary">Sedentary (little exercise)</option>
+            <option value="light">Light (1–3 days/wk)</option>
+            <option value="moderate">Moderate (3–5 days/wk)</option>
+            <option value="active">Active (6–7 days/wk)</option>
+            <option value="athlete">Very active (2×/day)</option>
+          </select></Field>
+        </Panel>
+      </section>
+
+      <section className="px-5 pt-6">
+        <SectionHeading title="BMI & calories" icon="flame" />
+        {metrics ? (
+          <>
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center">
+                <div className="text-2xl font-extrabold text-white">{metrics.bmi}</div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">BMI</div>
+                <div className="mt-0.5 text-[11px] font-semibold" style={{ color: metrics.cat.color }}>{metrics.cat.label}</div>
+              </div>
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center">
+                <div className="text-2xl font-extrabold text-[#3ddc97]">{metrics.tdee || "—"}</div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">Maintain</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">kcal/day</div>
+              </div>
+              <div className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center">
+                <div className="text-2xl font-extrabold text-[#00F2FE]">{metrics.cut || "—"}</div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">Cut −20%</div>
+                <div className="mt-0.5 text-[11px] text-slate-400">kcal/day</div>
+              </div>
+            </div>
+            <p className="mt-2 px-1 text-[11px] leading-relaxed text-slate-500">
+              {metrics.needAge ? "Add your age (and sex) for calorie targets. " : ""}
+              Estimates use the Mifflin-St Jeor equation × your activity level. A ~20% deficit is a common cut target — adjust to your own plan.
+            </p>
+          </>
+        ) : (
+          <Panel className="mt-3 p-4"><p className="text-sm text-slate-400">Enter your weight and height above to see BMI and calorie targets.</p></Panel>
+        )}
+      </section>
+
+      <section className="px-5 pt-6">
+        <SectionHeading title="Goals" icon="target" />
+        <Panel className="mt-3 p-4">
+          <div className="flex gap-3">
+            <div className="flex-1"><Field label={`Goal weight (${p.weightUnit})`}><input type="number" value={p.goalWeight} onChange={e => set("goalWeight", e.target.value)} className={inputCls} placeholder="170" /></Field></div>
+            <div className="flex-1"><Field label="Sleep goal (hrs)"><input type="number" value={p.goalSleep} onChange={e => set("goalSleep", e.target.value)} className={inputCls} placeholder="8" /></Field></div>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1"><Field label="Weekly adherence %"><input type="number" value={p.goalAdherence} onChange={e => set("goalAdherence", e.target.value)} className={inputCls} placeholder="90" /></Field></div>
+            <div className="flex-1"><Field label="Cycle length (wks)"><input type="number" value={p.cycleWeeks} onChange={e => set("cycleWeeks", e.target.value)} className={inputCls} placeholder="8" /></Field></div>
+          </div>
+        </Panel>
+      </section>
+
+      <section className="px-5 pt-6">
+        <SectionHeading title="Weight log" icon="scale" />
+        <Panel className="mt-3 p-4">
+          <div className="flex items-end gap-2">
+            <div className="flex-1"><Field label={`Log today's weight (${p.weightUnit})`}><input type="number" value={w} onChange={e => setW(e.target.value)} className={inputCls} placeholder="180" /></Field></div>
+            <button onClick={addWeight} className="mb-px rounded-xl bg-gradient-to-r from-[#00F2FE] to-[#3B82F6] px-4 py-2.5 text-sm font-bold text-[#04121a] transition active:scale-95">Add</button>
+          </div>
+          {series.length > 1 ? (
+            <div className="mt-4">
+              <div className="flex items-end justify-between">
+                <div><span className="text-2xl font-extrabold text-white">{wlog[wlog.length - 1].weight}</span><span className="ml-1 text-sm text-slate-400">{p.weightUnit}</span></div>
+                {p.goalWeight && <div className="text-right text-xs text-slate-400">goal <span className="font-semibold text-[#00F2FE]">{p.goalWeight} {p.weightUnit}</span></div>}
+              </div>
+              <div className="mt-1"><Sparkline data={series} color={ACCENTS.blue.hex} height={44} /></div>
+              <p className="mt-1 text-xs text-slate-500">{wlog.length} entr{wlog.length === 1 ? "y" : "ies"} logged</p>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-slate-500">Add a couple of entries to see your trend line.</p>
+          )}
+        </Panel>
+      </section>
+
+      <div className="px-5 pt-6">
+        <button onClick={save} className="w-full rounded-xl bg-gradient-to-r from-[#00F2FE] to-[#3B82F6] py-3 font-bold text-[#04121a] transition active:scale-95">Save profile</button>
+        <button onClick={onOpenSettings} className="mt-2 w-full rounded-xl border border-[#30363D] py-2.5 text-sm font-semibold text-slate-300 transition hover:text-white">App settings</button>
+      </div>
+    </div>
+  );
+}
+
 /* ---- root ---- */
 function PeptiSenseDashboard() {
   const [protocols,setProtocols]=useState(()=>loadProtocols());
   const [active,setActive]=useState("home");
   const [health,setHealth]=useState(()=>loadHealth());
+  const [profile,setProfile]=useState(()=>loadProfile());
   const [sheet,setSheet]=useState(null); // 'new' | protocol obj | null
   const [splash,setSplash]=useState(()=>!!SPLASH_SRC);
 
@@ -766,6 +970,7 @@ function PeptiSenseDashboard() {
   const deleteProtocol = (id) => { persist(protocols.filter(p=>p.id!==id)); setSheet(null); };
   const importHealth = (d) => { setHealth(d); saveHealth(d); };
   const clearHealth = () => { setHealth(null); try{ localStorage.removeItem(HKEY); }catch(e){} };
+  const saveProfileState = (pp) => { setProfile(pp); saveProfile(pp); };
   const clearAll = () => { persist([]); clearHealth(); };
 
   const insights = buildInsights(health, protocols);
@@ -776,13 +981,14 @@ function PeptiSenseDashboard() {
       <div className="absolute -left-32 top-0 h-72 w-72 rounded-full bg-[#00F2FE]/10 blur-[120px]" />
       <div className="absolute right-0 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[120px]" />
     </div>
-    <div className="mx-auto flex max-w-3xl flex-col" style={{ minHeight: "calc(100dvh - env(safe-area-inset-top))", paddingBottom: "calc(92px + env(safe-area-inset-bottom))" }}>
-      <Header onProfile={()=>nav("settings")} />
-      {active==="home" && <HomeTab protocols={protocols} insights={insights} onNav={nav} />}
+    <div className="safe-top mx-auto flex max-w-3xl flex-col" style={{ minHeight: "100dvh", paddingBottom: "calc(92px + env(safe-area-inset-bottom))" }}>
+      <Header profile={profile} onProfile={()=>nav("profile")} />
+      {active==="home" && <HomeTab protocols={protocols} insights={insights} profile={profile} onNav={nav} />}
       {active==="protocols" && <ActiveProtocols protocols={protocols} onLog={logDose} onEdit={(p)=>setSheet(p)} onAdd={()=>setSheet("new")} />}
       {active==="calculator" && <CalculatorCard />}
       {active==="insights" && <div className="flex-1"><ConnectHealthCard health={health} onImport={importHealth} onClear={clearHealth} /><BioSenseInsights items={insights} /></div>}
       {active==="settings" && <div className="flex-1"><SettingsTab onClearAll={clearAll} /></div>}
+      {active==="profile" && <ProfileScreen profile={profile} onSave={saveProfileState} onClose={()=>nav("home")} onOpenSettings={()=>nav("settings")} />}
     </div>
     <BottomNav active={active} onNav={nav} />
     {sheet && <ProtocolSheet editing={sheet} onClose={()=>setSheet(null)} onSave={saveProtocol} onDelete={deleteProtocol} />}
