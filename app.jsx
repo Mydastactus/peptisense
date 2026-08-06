@@ -192,7 +192,7 @@ function Coverflow({ items, renderCard, keyOf }) {
   const layout = () => {
     const el = scroller.current; if (!el) return;
     const w = el.clientWidth;
-    const cw = Math.max(230, Math.min(Math.round(w * 0.62), 340));
+    const cw = Math.max(260, Math.min(Math.round(w * 0.74), 400));
     const pad = Math.max(Math.round((w - cw) / 2), 8);
     el.style.paddingLeft = pad + "px";
     el.style.paddingRight = pad + "px";
@@ -687,7 +687,7 @@ function MetricCard({ item, onOpen }) {
   const big = String(item.value).length <= 5;
   return (
     <div onClick={onOpen}
-      className="flex h-[300px] cursor-pointer flex-col rounded-3xl border p-6 shadow-[0_12px_40px_rgba(0,0,0,0.5)] transition active:scale-[0.98]"
+      className="flex h-[380px] cursor-pointer flex-col rounded-3xl border p-6 shadow-[0_12px_40px_rgba(0,0,0,0.5)] transition active:scale-[0.98]"
       style={{ borderColor: a.raw + "55", background: `linear-gradient(160deg, ${a.raw}26, #141b26 62%)` }}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
