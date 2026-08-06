@@ -239,7 +239,7 @@ function Coverflow({ items, renderCard, keyOf }) {
 
 function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
   return (
-    <section id="protocols" className="pt-6">
+    <section id="protocols" className="flex flex-1 flex-col pt-6">
       <div className="flex items-center justify-between px-5">
         <div className="flex items-center gap-2">
           <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-slate-300">Active Protocols</h2>
@@ -248,8 +248,8 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
         <button onClick={onAdd} className="inline-flex items-center gap-1 rounded-lg bg-[#00F2FE]/10 px-2.5 py-1.5 text-xs font-bold text-[#00F2FE] transition active:scale-95"><Icon name="plus" size={14} stroke={2.6} /> Add</button>
       </div>
       {protocols.length === 0 ? (
-        <div className="mt-3 px-5">
-          <Panel className="p-7 text-center">
+        <div className="flex flex-1 items-center px-5">
+          <Panel className="w-full p-7 text-center">
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#00F2FE]/10 text-[#00F2FE]"><Icon name="syringe" size={22} /></div>
             <p className="mt-3 font-semibold text-white">No active protocols yet</p>
             <p className="mx-auto mt-1 max-w-xs text-sm text-slate-400">Add your first protocol to start tracking doses, timing, and weekly compliance.</p>
@@ -257,8 +257,10 @@ function ActiveProtocols({ protocols, onLog, onEdit, onAdd }) {
           </Panel>
         </div>
       ) : (
-        <div className="mt-1">
-          <Coverflow items={protocols} keyOf={(p)=>p.id} renderCard={(p)=><ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />} />
+        <div className="flex flex-1 items-center">
+          <div className="w-full">
+            <Coverflow items={protocols} keyOf={(p)=>p.id} renderCard={(p)=><ProtocolCard p={p} onLog={onLog} onEdit={onEdit} />} />
+          </div>
         </div>
       )}
     </section>
@@ -401,7 +403,7 @@ function CalculatorCard() {
       </div>
     </label>
   );
-  return <section id="calculator" className="px-5 pt-6">
+  return <section id="calculator" className="flex flex-1 flex-col justify-center px-5 py-6">
     <SectionHeading title="Reconstitution Calculator" hint="Quick math" icon="calculator" />
     <Panel accent="cyan" glow className="mt-3 overflow-hidden p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -726,14 +728,16 @@ function HomeTab({ protocols, insights, onNav }) {
     { id:"next", tab:"protocols", accent:"cyan", icon:"clock", label:"Next dose", value: nextP ? nextP.next : "—", unit:"", delta:null, series:null, breakdown:null, bar:null, sub: nextP ? `${nextP.name} · ${nextP.dose}` : "nothing scheduled" },
   ];
   return (
-    <div>
+    <div className="flex flex-1 flex-col">
       <CalloutBanner />
       <div className="px-5 pt-6"><SectionHeading title="Today at a glance" /></div>
-      <div className="mt-1">
-        <Coverflow items={deck} keyOf={(d)=>d.id} renderCard={(d)=><MetricCard item={d} onOpen={()=>onNav(d.tab)} />} />
+      <div className="flex flex-1 items-center">
+        <div className="w-full">
+          <Coverflow items={deck} keyOf={(d)=>d.id} renderCard={(d)=><MetricCard item={d} onOpen={()=>onNav(d.tab)} />} />
+        </div>
       </div>
       {protocols.length===0 && (
-        <section className="px-5 pt-2">
+        <section className="px-5 pb-4">
           <Panel className="p-5 text-center">
             <p className="font-semibold text-white">Welcome to PeptiSense</p>
             <p className="mx-auto mt-1 max-w-xs text-sm text-slate-400">Add a protocol and connect Apple Health to fill in your dashboard.</p>
@@ -772,13 +776,13 @@ function PeptiSenseDashboard() {
       <div className="absolute -left-32 top-0 h-72 w-72 rounded-full bg-[#00F2FE]/10 blur-[120px]" />
       <div className="absolute right-0 top-40 h-72 w-72 rounded-full bg-[#3B82F6]/10 blur-[120px]" />
     </div>
-    <div className="mx-auto max-w-3xl" style={{ paddingBottom: "calc(92px + env(safe-area-inset-bottom))" }}>
+    <div className="mx-auto flex max-w-3xl flex-col" style={{ minHeight: "calc(100dvh - env(safe-area-inset-top))", paddingBottom: "calc(92px + env(safe-area-inset-bottom))" }}>
       <Header onProfile={()=>nav("settings")} />
       {active==="home" && <HomeTab protocols={protocols} insights={insights} onNav={nav} />}
       {active==="protocols" && <ActiveProtocols protocols={protocols} onLog={logDose} onEdit={(p)=>setSheet(p)} onAdd={()=>setSheet("new")} />}
       {active==="calculator" && <CalculatorCard />}
-      {active==="insights" && <><ConnectHealthCard health={health} onImport={importHealth} onClear={clearHealth} /><BioSenseInsights items={insights} /></>}
-      {active==="settings" && <SettingsTab onClearAll={clearAll} />}
+      {active==="insights" && <div className="flex-1"><ConnectHealthCard health={health} onImport={importHealth} onClear={clearHealth} /><BioSenseInsights items={insights} /></div>}
+      {active==="settings" && <div className="flex-1"><SettingsTab onClearAll={clearAll} /></div>}
     </div>
     <BottomNav active={active} onNav={nav} />
     {sheet && <ProtocolSheet editing={sheet} onClose={()=>setSheet(null)} onSave={saveProtocol} onDelete={deleteProtocol} />}
