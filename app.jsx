@@ -757,7 +757,6 @@ function HomeTab({ protocols, insights, profile, onNav }) {
   const wSeries = wlog.slice(-8).map(x=>x.weight);
   const latestW = wlog.length ? wlog[wlog.length-1].weight : null;
   const wUnit = (profile && profile.weightUnit) || "lb";
-  const metrics = bodyMetrics(profile || {});
   const deck = [
     { ...sleep, tab:"insights", sub: sleep.value==="—" ? "Import Apple Health" : sleep.caption },
     { ...comp, tab:"insights", series:null, bar: compPct, sub: compPct==null ? "Add protocols to track" : "this week's dose adherence" },
@@ -769,25 +768,6 @@ function HomeTab({ protocols, insights, profile, onNav }) {
     <div className="flex flex-1 flex-col">
       <CalloutBanner />
       <div className="px-5 pt-6"><SectionHeading title="Today at a glance" /></div>
-      {metrics && (
-        <div className="grid grid-cols-3 gap-3 px-5 pt-3">
-          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
-            <div className="text-xl font-extrabold text-white">{metrics.bmi}</div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">BMI</div>
-            <div className="text-[10px] font-semibold" style={{ color: metrics.cat.color }}>{metrics.cat.label}</div>
-          </button>
-          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
-            <div className="text-xl font-extrabold text-[#3ddc97]">{metrics.tdee || "—"}</div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Maintain</div>
-            <div className="text-[10px] text-slate-400">kcal</div>
-          </button>
-          <button onClick={()=>onNav("profile")} className="rounded-2xl border border-[#30363D] bg-[#161B22]/80 p-3 text-center transition active:scale-[0.98]">
-            <div className="text-xl font-extrabold text-[#00F2FE]">{metrics.cut || "—"}</div>
-            <div className="text-[10px] uppercase tracking-wide text-slate-500">Cut −20%</div>
-            <div className="text-[10px] text-slate-400">kcal</div>
-          </button>
-        </div>
-      )}
       <div className="flex flex-1 items-center">
         <div className="w-full">
           <Coverflow items={deck} keyOf={(d)=>d.id} renderCard={(d)=><MetricCard item={d} onOpen={()=>onNav(d.tab)} />} />
@@ -968,7 +948,15 @@ function PeptiSenseDashboard() {
   const logDose = (id) => persist(protocols.map(p=>(p.id===id && p.done<(p.total||0))?{...p,done:p.done+1}:p));
   const saveProtocol = (rec) => { const exists=protocols.some(p=>p.id===rec.id); persist(exists?protocols.map(p=>p.id===rec.id?rec:p):[...protocols,rec]); setSheet(null); };
   const deleteProtocol = (id) => { persist(protocols.filter(p=>p.id!==id)); setSheet(null); };
-  const importHealth = (d) => { setHealth(d); saveHealth(d); };
+  const importHealth = (d) => setHealth(prev => {
+    // merge: a sleep-only or HRV-only file keeps whatever was already imported
+    const merged = {
+      sleep: (d.sleep && d.sleep.length) ? d.sleep : ((prev && prev.sleep) || []),
+      hrv:   (d.hrv && d.hrv.length)     ? d.hrv   : ((prev && prev.hrv)   || []),
+      syncedAt: d.syncedAt || (prev && prev.syncedAt) || new Date().toISOString(),
+    };
+    saveHealth(merged); return merged;
+  });
   const clearHealth = () => { setHealth(null); try{ localStorage.removeItem(HKEY); }catch(e){} };
   const saveProfileState = (pp) => { setProfile(pp); saveProfile(pp); };
   const clearAll = () => { persist([]); clearHealth(); };
