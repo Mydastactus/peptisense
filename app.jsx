@@ -674,7 +674,7 @@ function Splash({ onDone }) {
   useEffect(() => { const t = setTimeout(finish, 12000); return () => clearTimeout(t); }, []);
   return (
     <div onClick={finish} className={`fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A] transition-opacity duration-500 ${hiding ? "opacity-0" : "opacity-100"}`}>
-      <video autoPlay muted playsInline preload="auto" onEnded={finish} onError={finish} className="h-full w-full object-cover" src={SPLASH_SRC} />
+      <video autoPlay muted playsInline preload="auto" onEnded={finish} onError={finish} className="h-full w-full object-contain" src={SPLASH_SRC} />
       <button onClick={(e)=>{ e.stopPropagation(); finish(); }} className="absolute right-4 rounded-full bg-black/40 px-3.5 py-1.5 text-xs font-semibold text-white backdrop-blur transition active:scale-95" style={{ top: "calc(env(safe-area-inset-top) + 16px)" }}>Skip ›</button>
     </div>
   );
